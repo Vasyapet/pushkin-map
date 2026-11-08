@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <!-- Эта строка нужна, чтобы сайт правильно выглядел на телефоне -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Литературная карта Москвы. Пушкин рядом</title>
+
+  <!-- Подключаем Leaflet: стили и сам скрипт (через интернет, скачивать не нужно) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Наши стили -->
+  <style>
+/* Цвета лежат в переменных, чтобы их легко менять в одном месте */
+:root {
+  --ink: #4a2c1a;
+  --paper: #faf1e0;
+  --accent: #c8651b;
+  --done: #6b7f2a;
+}
+
+/* Одинаковый расчёт размеров для всех элементов */
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+
+/* Страница: шапка сверху, карта занимает всё остальное */
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 12px 16px;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+header h1 { margin: 0; font-size: 1.3rem; }
+header p  { margin: 0; font-size: 0.95rem; }
+
+#map { flex: 1; }
+
+/* Карточка лежит поверх карты внизу экрана */
+#card {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 60%;
+  overflow-y: auto;
+  padding: 16px 20px 20px;
+  background: #fff;
+  border-top: 4px solid var(--accent);
+  z-index: 1000;            /* чтобы карточка была выше карты */
+}
+
+/* Атрибут hidden должен реально скрывать карточку */
+#card[hidden] { display: none; }
+
+#card h2 { margin: 0 32px 8px 0; font-size: 1.2rem; }
+#card p  { margin: 0 0 10px; line-height: 1.5; }
+
+#card blockquote {
+  margin: 12px 0 6px;
+  padding-left: 12px;
+  border-left: 3px solid var(--ink);
+  font-style: italic;
+  white-space: pre-line;    /* чтобы переносы строк в цитате сохранялись */
+}
+
+#card-source { font-size: 0.85rem; opacity: 0.75; }
+
+#card-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  border: 0;
+  background: none;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+#card-visit {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+#card-visit:disabled {
+  background: var(--done);
+  cursor: default;
+}
+
+/* На широком экране карточка становится панелью слева */
+@media (min-width: 700px) {
+  #card {
+    left: 16px;
+    right: auto;
+    bottom: 16px;
+    width: 360px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+}
+/* hidden должен всегда прятать элемент */
+[hidden] { display: none !important; }
+
+.screen { padding: 24px 16px; text-align: center; }
+
+/* Крупные кнопки: удобно нажимать на телефоне */
+.screen > button, #age-buttons button {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  margin: 10px auto;
+  padding: 14px;
+  font-size: 1.05rem;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* Выбранный возраст закрашивается */
+.age-btn.selected { background: var(--ink) !important; color: #fff !important; }
+
+#name-input {
+  width: 100%;
+  max-width: 320px;
+  padding: 12px;
+  font-size: 1.05rem;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+}
+
+/*Экран с картой занимает всё место, без отступов*/
+#screen-map { flex: 1; min-height: 0; padding: 0; display: flex; flex-direction: column; }
+header .btn-to-menu {
+padding: 6px 14px;
+font-size: 0.95rem;
+font-family: inherit;
+color: var(--paper);
+background: transparent;
+border: 2px solid var(--paper);
+border-radius: 20px;
+cursor: pointer;
+}
+header .btn-to-menu:hover {
+background: var(--accent);
+border-color: var(--accent);
+} 
+  </style>
+</head>
+<body>
+<!-- ЭКРАН 1: приветствие -->
+<section id="screen-welcome" class="screen">
+  <h1>Пушкинская Москва</h1>
+  <p>Добро пожаловать! Кто ты?</p>
+  <input id="name-input" placeholder="Твоё имя" maxlength="30">
+  <p>Выбери возраст:</p>
+  <div id="age-buttons">
+    <button class="age-btn" data-age="junior">Начальная школа</button>
+    <button class="age-btn" data-age="middle">5-8 класс</button>
+    <button class="age-btn" data-age="senior">9-11 класс</button>
+    <button class="age-btn" data-age="teacher">Учитель</button>
+    <button class="age-btn" data-age="adult">Взрослый</button>
+  </div>
+  <button id="btn-start">Начать</button>
+  <button id="btn-skip">Продолжить без имени</button>
+</section>
+
+<!-- ЭКРАН 2: меню -->
+<section id="screen-menu" class="screen" hidden>
+  <h2 id="greeting"></h2>
+  <button id="btn-route">Приступить к маршруту</button>
+  <button id="btn-games">Игры</button>
+  <button id="btn-reset">Сменить имя</button>
+</section>
+
+<!-- Список игр -->
+<section id="screen-games" class="screen" hidden>
+  <h2>Игры</h2>
+  <button id="btn-game-quiz">Верно или неверно?</button>
+  <button id="btn-game-word">Угадай слово</button>
+  <button class="btn-to-menu">← В меню</button>
+</section>
+
+<!-- Игра 1: Верно или неверно -->
+<section id="screen-quiz" class="screen" hidden>
+  <h2>Верно или неверно?</h2>
+  <p id="quiz-question"></p>
+  <button id="quiz-true">Верно</button>
+  <button id="quiz-false">Неверно</button>
+  <p id="quiz-result"></p>
+  <button id="quiz-next" hidden>Дальше →</button>
+  <button class="btn-to-games">← К играм</button>
+</section>
+
+<!-- Игра 2: Угадай слово -->
+<!-- Список игр -->
+<section id="screen-games" class="screen" hidden>
+  <h2>Игры</h2>
+  <button id="btn-game-quiz">Верно или неверно?</button>
+  <button id="btn-game-word">Угадай слово</button>
+  <button class="btn-to-menu">← В меню</button>
+</section>
+
+<!-- Игра 1: Верно или неверно -->
+<section id="screen-quiz" class="screen" hidden>
+  <h2>Верно или неверно?</h2>
+  <p id="quiz-question"></p>
+  <button id="quiz-true">Верно</button>
+  <button id="quiz-false">Неверно</button>
+  <p id="quiz-result"></p>
+  <button id="quiz-next" hidden>Дальше →</button>
+  <button class="btn-to-games">← К играм</button>
+</section>
+
+<section id="screen-games" class="screen" hidden>
+  <h2>Игры</h2>
+  <button id="btn-game-quiz">Верно или неверно?</button>
+  <button id="btn-game-word">Угадай слово</button>
+  <button class="btn-to-menu">← В меню</button>
+</section>
+
+<!-- Игра 1: Верно или неверно -->
+<section id="screen-quiz" class="screen" hidden>
+  <h2>Верно или неверно?</h2>
+  <p id="quiz-question"></p>
+  <button id="quiz-true">Верно</button>
+  <button id="quiz-false">Неверно</button>
+  <p id="quiz-result"></p>
+  <button id="quiz-next" hidden>Дальше →</button>
+  <button class="btn-to-games">← К играм</button>
+</section>
+
+<!-- Игра 2: Угадай слово -->
+<section id="screen-word" class="screen" hidden>
+  <h2>Угадай слово</h2>
+  <p id="word-line"></p>
+  <button class="word-opt"></button>
+  <button class="word-opt"></button>
+  <button class="word-opt"></button>
+  <p id="word-result"></p>
+  <button id="word-next" hidden>Дальше →</button>
+  <button class="btn-to-games">← К играм</button>
+</section>
+
+
+  <div id="screen-map" class="screen" hidden>
+  <header>
+    <h1>Пушкин рядом</h1>
+    <button class="btn-to-menu">Меню</button>
+    <p id="progress">Пройдено: 0 из 0</p>
+  </header>
+  <div id="map"></div>
+</div>
+
+  <!-- Карточка места. Сначала скрыта, появляется при нажатии на точку -->
+  <section id="card" hidden>
+    <button id="card-close" aria-label="Закрыть">×</button>
+    <h2 id="card-title"></h2>
+    <p id="card-text"></p>
+    <blockquote id="card-quote"></blockquote>
+    <p id="card-source"></p>
+    <button id="card-visit">Отметить как пройденное</button>
+  </section>
+
+  <!-- Порядок важен: сначала данные, потом логика -->
+  <script>
+// ===== ДАННЫЕ (в полной версии они лежат в data/places.js) =====
+// Здесь хранятся все места. Чтобы добавить новое, скопируйте один блок { ... },
+// поставьте запятую после предыдущего и измените данные.
+//
+// ВАЖНО: координаты ниже примерные. Проверьте каждую в Яндекс.Картах или
+// OpenStreetMap: нажмите правой кнопкой на нужное место и скопируйте координаты.
+// Цитаты и источники тоже нужно сверить по изданию.
+
+const places = [
+  {
+    id: "arbat",                       // короткое имя без пробелов, оно должно быть уникальным
+    name: "Мемориальная квартира на Арбате",
+    coords: [55.7488, 37.5900],        // [широта, долгота]
+    text: "Здесь Пушкин жил с Натальей Гончаровой после свадьбы в 1831 году.",
+    quote: "Москва... как много в этом звуке\nДля сердца русского слилось!",
+    source: "А. С. Пушкин. «Евгений Онегин», глава 7, строфа XXXVI"
+  },
+  {
+    id: "sobor",                       // короткое имя без пробелов, оно должно быть уникальным
+    name: "Богоявленский собор в Елохове",
+    coords: [55.772603, 37.674741],        // [широта, долгота]
+    text: "Место, где 8 июня 1799 года крестили младенца Александра.",
+    quote: "В этой церкви в 1799 году был крещён младенец Александр Пушкин.",
+    source: "Пушкинские места Москвы // Интерактивный путеводитель «Узнай Москву» : официальный портал Правительства Москвы."
+  },
+  {
+    id: "pereulok",                       // короткое имя без пробелов, оно должно быть уникальным
+    name: "Большой Харитоньевский переулок",
+    coords: [55.765372, 37.647369],        // [широта, долгота]
+    text: "Переулок интересен в первую очередь тем, что здесь некоторое время, в самом юном возрасте, жил Александр Сергеевич Пушкин.",
+    quote: "Домик называли «Ларинским», предполагая, что именно его имел в виду Пушкин, описывая приезд Татьяны Лариной в Москву:\nВ сей утомительной прогулке\nПроходит час-другой, и вот\nУ Харитонья в переулке...",
+    source: "А. С. Пушкин, «Евгений Онегин», глава 7, строфа XXXVI."
+  },
+  {
+    id: "basmannaya",                       // короткое имя без пробелов, оно должно быть уникальным
+    name: "Дом-музей В.Л.Пушкина",
+    coords: [55.769013, 37.668992],        // [широта, долгота]
+    text: " Сюда, в этот дом, 8 сентября 1826 года приехал его знаменитый племянник Александр Пушкин после аудиенции в Кремле у Николая I, вернувшего его в Москву из ссылки.",
+    quote: "А.С. Пушкин высоко ценил дядю, посвящал ему стихи и нередко обращался к нему за мнением.",
+    source: "Пушкинские места Москвы // Интерактивный путеводитель «Узнай Москву» : официальный портал Правительства Москвы."
+  },
+  {
+    id: "nikitskie",
+    name: "Церковь Большое Вознесение",
+    coords: [55.7570, 37.6045],
+    text: "Здесь в 1831 году венчались Пушкин и Наталья Гончарова.",
+    quote: "Цитата",
+    source: "Источник"
+  },
+  {
+    id: "tverskaya",
+    name: "Памятник Пушкину на Тверском бульваре",
+    coords: [55.7650, 37.6054],
+    text: "Один из самых известных памятников поэту в Москве.",
+    quote: "Цитата",
+    source: "Источник"
+  }
+];
+
+// ===== ЛОГИКА (в полной версии это app.js) =====
+// ============ 1. КАРТА ============
+// L.map("map") создаёт карту внутри элемента с id="map".
+// setView([широта, долгота], масштаб) выбирает, куда смотреть. Центр Москвы:
+const map = L.map("map").setView([55.7558, 37.6173], 12);
+
+// Подложка карты (сами картинки карты) от OpenStreetMap. Бесплатно, без ключей.
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "© участники OpenStreetMap"
+}).addTo(map);
+
+
+// ============ 2. ПРОГРЕСС ============
+// localStorage хранит данные в браузере, даже если страницу закрыли.
+// Хранить можно только текст, поэтому массив превращаем в строку (JSON).
+function loadVisited() {
+  try {
+    return JSON.parse(localStorage.getItem("visited")) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveVisited(list) {
+  localStorage.setItem("visited", JSON.stringify(list));
+}
+
+let visited = loadVisited();   // список id пройденных мест, например ["arbat"]
+
+
+// ============ 3. ЭЛЕМЕНТЫ СТРАНИЦЫ ============
+// Находим нужные элементы по id, чтобы потом менять их содержимое.
+const card = document.getElementById("card");
+const cardTitle = document.getElementById("card-title");
+const cardText = document.getElementById("card-text");
+const cardQuote = document.getElementById("card-quote");
+const cardSource = document.getElementById("card-source");
+const visitBtn = document.getElementById("card-visit");
+const progress = document.getElementById("progress");
+
+let currentPlace = null;       // какое место сейчас открыто
+const markers = {};            // тут храним маркеры: markers["arbat"] = маркер
+
+
+// ============ 4. ОБНОВЛЕНИЕ ВНЕШНЕГО ВИДА ============
+function updateProgress() {
+  progress.textContent = "Пройдено: " + visited.length + " из " + places.length;
+}
+
+function updateMarker(place) {
+  // Пройденные точки закрашиваем другим цветом
+  const done = visited.includes(place.id);
+  markers[place.id].setStyle({
+    fillColor: done ? "#2f7d5b" : "#b3472f",
+    color: "#1f3a4d"
+  });
+}
+
+function updateVisitButton() {
+  const done = visited.includes(currentPlace.id);
+  visitBtn.textContent = done ? "Уже пройдено ✓" : "Отметить как пройденное";
+  visitBtn.disabled = done;
+}
+
+
+// ============ 5. КАРТОЧКА МЕСТА ============
+function openCard(place) {
+  currentPlace = place;
+  cardTitle.textContent = place.name;
+  cardText.textContent = place.text;
+  cardQuote.textContent = place.quote;
+  cardSource.textContent = place.source;
+  updateVisitButton();
+  card.hidden = false;
+}
+
+document.getElementById("card-close").addEventListener("click", function () {
+  card.hidden = true;
+});
+
+visitBtn.addEventListener("click", function () {
+  visited.push(currentPlace.id);
+  saveVisited(visited);
+  updateMarker(currentPlace);
+  updateProgress();
+  updateVisitButton();
+});
+
+
+// ============ 6. ТОЧКИ НА КАРТЕ ============
+// Проходим по списку мест и для каждого ставим круглую точку.
+places.forEach(function (place) {
+  const marker = L.circleMarker(place.coords, {
+    radius: 11,
+    weight: 3,
+    fillOpacity: 0.9
+  }).addTo(map);
+
+  markers[place.id] = marker;
+  updateMarker(place);
+
+  // По нажатию на точку открываем карточку
+  marker.on("click", function () {
+    openCard(place);
+  });
+});
+
+updateProgress();
+
+
+// ============ ЧТО ДАЛЬШЕ (по неделям плана) ============
+// - Добавить остальные места в data/places.js
+// - Неделя 2: геолокация. Изучить navigator.geolocation.watchPosition
+//   и расстояние между точками (map.distance(точкаА, точкаБ)).
+// - Неделя 3: тесты и игровые задания внутри карточки.
+
+
+// ============ ЭКРАНЫ И ПРИВЕТСТВИЕ ============
+
+// Показывает один экран и прячет остальные
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(function (s) {
+    s.hidden = true;
+  });
+  document.getElementById(id).hidden = false;
+  if (id === "screen-map") {
+    map.invalidateSize();   // иначе скрытая карта покажется серой
+  }
+}
+
+// Выбор возраста: запоминаем и подсвечиваем кнопку
+let selectedAge = null;
+document.querySelectorAll(".age-btn").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    selectedAge = btn.dataset.age;      // берём значение из data-age
+    document.querySelectorAll(".age-btn").forEach(function (b) {
+      b.classList.remove("selected");
+    });
+    btn.classList.add("selected");
+  });
+});
+
+// Показать меню с приветствием
+function enterMenu() {
+  const name = localStorage.getItem("name") || "друг";
+  document.getElementById("greeting").textContent = "Привет, " + name + "!";
+  showScreen("screen-menu");
+}
+
+// Кнопка "Начать"
+document.getElementById("btn-start").addEventListener("click", function () {
+  const name = document.getElementById("name-input").value.trim() || "друг";
+  localStorage.setItem("name", name);
+  localStorage.setItem("age", selectedAge || "");
+  enterMenu();
+});
+
+// Кнопка "Продолжить без имени"
+document.getElementById("btn-skip").addEventListener("click", function () {
+  localStorage.setItem("name", "друг");
+  enterMenu();
+});
+
+// Кнопки меню
+document.getElementById("btn-route").addEventListener("click", function () {
+  showScreen("screen-map");
+});
+document.getElementById("btn-games").addEventListener("click", function () {
+  showScreen("screen-games");
+});
+document.getElementById("btn-reset").addEventListener("click", function () {
+  localStorage.removeItem("name");
+  localStorage.removeItem("age");
+  showScreen("screen-welcome");
+});
+
+// Все кнопки "В меню" (их несколько, поэтому querySelectorAll)
+document.querySelectorAll(".btn-to-menu").forEach(function (btn) {
+  btn.addEventListener("click", enterMenu);
+});
+
+// ПРИ ЗАГРУЗКЕ: если имя уже сохранено, сразу меню, иначе приветствие
+if (localStorage.getItem("name")) {
+  enterMenu();
+} else {
+  showScreen("screen-welcome");
+}
+// ============ ИГРА: ВЕРНО ИЛИ НЕВЕРНО ============
+
+// Список вопросов. answer: true - утверждение верное, false - неверное.
+const quiz = [
+  { q: "Пушкин родился в Москве.", answer: true },
+  { q: "Пушкин написал рассказ «Муму».", answer: false },
+  { q: "Пушкин венчался с Натальей Гончаровой в Москве.", answer: true }
+];
+
+let quizIndex = 0;   // номер текущего вопроса (начинается с 0)
+let quizScore = 0;   // сколько ответов правильных
+
+// Показывает текущий вопрос (или итог, если вопросы закончились)
+function showQuestion() {
+  document.getElementById("quiz-result").textContent = "";
+  document.getElementById("quiz-next").hidden = true;
+
+  if (quizIndex >= quiz.length) {
+    document.getElementById("quiz-question").textContent =
+      "Игра окончена! Правильных ответов: " + quizScore + " из " + quiz.length;
+    document.getElementById("quiz-true").hidden = true;
+    document.getElementById("quiz-false").hidden = true;
+    return;
+  }
+
+  document.getElementById("quiz-question").textContent = quiz[quizIndex].q;
+  document.getElementById("quiz-true").hidden = false;
+  document.getElementById("quiz-false").hidden = false;
+}
+
+// Проверяет ответ. choice: true (нажали "Верно") или false (нажали "Неверно")
+function answerQuiz(choice) {
+  const correct = quiz[quizIndex].answer === choice;
+  if (correct) quizScore++;
+  document.getElementById("quiz-result").textContent = correct ? "Верно! 🎉" : "Неверно 🙈";
+  document.getElementById("quiz-true").hidden = true;
+  document.getElementById("quiz-false").hidden = true;
+  document.getElementById("quiz-next").hidden = false;
+}
+
+// Кнопки игры
+document.getElementById("quiz-true").addEventListener("click", function () {
+  answerQuiz(true);
+});
+document.getElementById("quiz-false").addEventListener("click", function () {
+  answerQuiz(false);
+});
+document.getElementById("quiz-next").addEventListener("click", function () {
+  quizIndex++;
+  showQuestion();
+});
+
+// ============ ПЕРЕХОДЫ ИЗ СПИСКА ИГР ============
+
+// Выбрали "Верно или неверно": начинаем игру заново
+document.getElementById("btn-game-quiz").addEventListener("click", function () {
+  quizIndex = 0;
+  quizScore = 0;
+  showQuestion();
+  showScreen("screen-quiz");
+});
+
+// Выбрали "Угадай слово": начинаем игру заново
+document.getElementById("btn-game-word").addEventListener("click", function () {
+  wordIndex = 0;
+  wordScore = 0;
+  showWord();
+  showScreen("screen-word");
+});
+
+// Все кнопки "К играм" возвращают в список игр
+document.querySelectorAll(".btn-to-games").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    showScreen("screen-games");
+  });
+});
+
+
+// ============ ИГРА: УГАДАЙ СЛОВО ============
+
+// Каждая строка: текст с пропуском, три варианта и номер правильного.
+// Номера считаются с нуля: 0 - первый вариант, 1 - второй, 2 - третий.
+const words = [
+  { line: "Мой дядя самых честных ___",
+    options: ["правил", "законов", "кровей"], correct: 0 },
+  { line: "Унылая пора! Очей ___",
+    options: ["очарованье", "утешенье", "волненье"], correct: 0 },
+  { line: "У лукоморья дуб ___",
+    options: ["высокий", "зелёный", "старый"], correct: 1 }
+];
+
+let wordIndex = 0;   // какая строка сейчас на экране
+let wordScore = 0;   // сколько ответов правильных
+
+// Показывает текущую строку (или итог, если строки закончились)
+function showWord() {
+  document.getElementById("word-result").textContent = "";
+  document.getElementById("word-next").hidden = true;
+  const buttons = document.querySelectorAll(".word-opt");
+
+  if (wordIndex >= words.length) {
+    document.getElementById("word-line").textContent =
+      "Игра окончена! Правильных ответов: " + wordScore + " из " + words.length;
+    buttons.forEach(function (b) { b.hidden = true; });
+    return;
+  }
+
+  const w = words[wordIndex];
+  document.getElementById("word-line").textContent = w.line;
+  buttons.forEach(function (btn, i) {
+    btn.textContent = w.options[i];   // подписываем кнопку нужным словом
+    btn.hidden = false;
+  });
+}
+
+// Проверяет ответ. i - номер нажатой кнопки (0, 1 или 2)
+function answerWord(i) {
+  const w = words[wordIndex];
+  const correct = (i === w.correct);
+  if (correct) wordScore++;
+  document.getElementById("word-result").textContent = correct
+    ? "Верно! 🎉"
+    : "Неверно 🙈 Правильно: " + w.options[w.correct];
+  document.querySelectorAll(".word-opt").forEach(function (b) { b.hidden = true; });
+  document.getElementById("word-next").hidden = false;
+}
+
+// Вешаем на каждую из трёх кнопок проверку ответа
+document.querySelectorAll(".word-opt").forEach(function (btn, i) {
+  btn.addEventListener("click", function () {
+    answerWord(i);
+  });
+});
+
+// Кнопка "Дальше"
+document.getElementById("word-next").addEventListener("click", function () {
+  wordIndex++;
+  showWord();
+});
+</script>
+</body>
+</html>
